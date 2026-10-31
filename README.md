@@ -4,11 +4,11 @@ A browser-only dashboard for recording Google PageSpeed Insights runs and prepar
 
 ## Use it
 
-1. Enter one or more public URLs, choose **Mobile** or **Desktop**, and run PageSpeed before making changes.
+1. Enter one or more public URLs and run PageSpeed before making changes. **Both** is selected by default, so every URL is tested on mobile and desktop. You can also select one device.
 2. Make your improvements, then run the exact same URL and device again.
-3. Open the website folder and select the desired **Before** and **After** runs. Add a description of the work you completed.
-4. Download the **Client report**, open the HTML file, and use **Print / save as PDF** to share it. It compares scores and lab metrics and lists remaining Google insights.
-5. Download **AI comparison JSON** and give it to your coding agent. It contains both complete, unchanged PageSpeed API responses, including Lighthouse audit details, resource evidence, and field data when Google provides it. **Selected Google JSON** exports the original response for the selected After run alone.
+3. Open the domain folder to see all pages, with mobile and desktop side by side. Select the desired **Before** and **After** runs for each device, and add a description of the work you completed.
+4. Download **Full client report** from the folder to include all of that domain’s pages and devices in one document. Open the HTML file and use **Print / save as PDF** to share it. It compares scores and lab metrics and lists Google insights. Where there is only one run, it is shown as a baseline with no after result.
+5. Download **Full AI report (JSON)** from the folder and give it to your coding agent. It includes every saved run for all pages and devices in that folder, including each complete, unchanged PageSpeed API response, Lighthouse audit details, resource evidence, and field data when Google provides it. Individual page/device exports are also available. **Google JSON** exports the original response for the selected After run.
 
 Only future runs contain the complete Google response. Reports saved by an older version remain available as summary-only reports; their missing original data cannot be recovered. A comparison can include these older runs, but the AI export identifies the missing data.
 

@@ -31,40 +31,85 @@ function compatible(before, after) { return canonicalURL(before.url) === canonic
 function filename(report, type, ext) { return `pagespeed-${new URL(report.url).hostname}-${report.strategy}-${type}.${ext}`; }
 function clientReport(before, after, notes) {
   if (!compatible(before, after)) throw new Error('Compare the same URL and device.');
-  const e = escapeHTML;
-  const metricNames = [...new Set([...before.metrics, ...after.metrics].map(m => m.title))];
-  const metricValue = (r, name) => r.metrics.find(m => m.title === name)?.value || 'Not available';
-  const delta = before.score == null || after.score == null ? 'Not available' : `${after.score - before.score > 0 ? '+' : ''}${after.score - before.score} points`;
-  const recs = after.recommendations.map(a => `<li><strong>${e(a.title)}</strong>${a.displayValue ? ` <span>${e(a.displayValue)}</span>` : ''}<p>${e(a.description)}</p></li>`).join('');
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>PageSpeed comparison — ${e(after.url)}</title><style>body{font:15px/1.6 system-ui,sans-serif;color:#203328;max-width:900px;margin:48px auto;padding:0 24px}h1,h2{line-height:1.2}h1{font-size:36px}h2{margin-top:42px}.tag{color:#56765c;text-transform:uppercase;letter-spacing:.12em;font-size:12px;font-weight:bold}.muted{color:#637469;overflow-wrap:anywhere}.scores{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:28px 0}.card{background:#eef5e9;padding:20px;border-radius:12px}.card b{display:block;font-size:30px}.card small{color:#637469}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:12px;border-bottom:1px solid #dce6dc}li{margin:15px 0}li p{color:#637469;margin:4px 0;white-space:pre-wrap}.notes{white-space:pre-wrap}button{background:#203d30;color:white;border:0;border-radius:8px;padding:12px 16px;cursor:pointer}@media print{body{margin:0;max-width:none}button{display:none}.card{border:1px solid #dce6dc}a{color:inherit}}@media(max-width:550px){.scores{grid-template-columns:1fr}th,td{padding:8px}}</style></head><body><button onclick="window.print()">Print / save as PDF</button><p class="tag">Website performance report</p><h1>Before &amp; after</h1><p class="muted">${e(after.url)}<br>${e(after.strategy)} · Google PageSpeed Insights</p><div class="scores"><div class="card"><small>BEFORE · ${e(new Date(before.date).toLocaleString())}</small><b>${e(before.score ?? '—')}</b><small>Performance score / 100</small></div><div class="card"><small>AFTER · ${e(new Date(after.date).toLocaleString())}</small><b>${e(after.score ?? '—')}</b><small>Performance score / 100</small></div><div class="card"><small>CHANGE</small><b>${e(delta)}</b><small>Performance score</small></div></div><h2>What changed</h2><p class="notes">${e(notes.trim() || 'No changes were described for this report.')}</p><h2>Lab measurements</h2><table><thead><tr><th>Metric</th><th>Before</th><th>After</th></tr></thead><tbody>${metricNames.map(name => `<tr><th scope="row">${e(name)}</th><td>${e(metricValue(before,name))}</td><td>${e(metricValue(after,name))}</td></tr>`).join('') || '<tr><td colspan="3">No lab metrics available.</td></tr>'}</tbody></table><h2>Remaining Google insights</h2>${recs ? `<ol>${recs}</ol>` : '<p>No actionable insights were returned for the after run.</p>'}<p class="muted">These are lab measurements from two individual runs; scores can vary. A change in score alone does not prove its cause. For the complete findings and evidence, use the accompanying AI data export.</p></body></html>`;
+  return websiteReport(new URL(after.url).hostname, [{url:after.url, strategy:after.strategy, before, after, notes}], false);
 }
 function aiExport(before, after, notes) {
   if (!compatible(before, after)) throw new Error('Compare the same URL and device.');
   return {format:'PageSpeed Workbench comparison v1', instructions:'Compare the before and after Google responses. Use lighthouseResult audits, details, metricSavings and field data where available. Identify remaining actionable issues and affected resources, cite the audit IDs and evidence, and do not assume a cause for score changes. Check the actual codebase before making changes.', url:after.url, strategy:after.strategy, changesDescribedByUser:notes, before:{date:before.date, score:before.score, googleResponse:before.googleResponse || null, savedSummary:before.googleResponse ? undefined : before}, after:{date:after.date, score:after.score, googleResponse:after.googleResponse || null, savedSummary:after.googleResponse ? undefined : after}, note:'A null googleResponse indicates an older summary-only report; run a new audit to capture the full response.'};
 }
-function websiteReport(domain, comparisons) {
+function websiteReport(domain, comparisons, showMissingDevices = true) {
   const e = escapeHTML;
+  const digits = value => String(value).replace(/[0-9]/g, d => '۰۱۲۳۴۵۶۷۸۹'[Number(d)]);
+  const faDate = date => {
+    const d = new Date(date);
+    return Number.isNaN(d.valueOf()) ? 'تاریخ ثبت نشده' : new Intl.DateTimeFormat('fa-IR-u-ca-persian', {year:'numeric', month:'long', day:'numeric'}).format(d);
+  };
+  const faValue = value => {
+    if (value == null || value === '') return '—';
+    return digits(String(value).replace(/(\d)\.(\d)/g, '$1٫$2').replace(/(\d),(\d)/g, '$1٬$2').replace(/\s*ms\b/g, ' میلی‌ثانیه').replace(/\s*s\b/g, ' ثانیه'));
+  };
+  const metricNames = {
+    'First Contentful Paint':'زمان نمایش اولین محتوای صفحه',
+    'Largest Contentful Paint':'زمان نمایش محتوای اصلی صفحه',
+    'Total Blocking Time':'زمان مسدود بودن صفحه',
+    'Cumulative Layout Shift':'میزان جابه‌جایی عناصر صفحه',
+    'Speed Index':'شاخص سرعت نمایش صفحه'
+  };
+  const insights = {
+    'use efficient cache lifetimes':'بهبود مدت نگهداری فایل‌ها در حافظه مرورگر',
+    'font display':'بهبود نمایش نوشته‌ها هنگام بارگذاری قلم',
+    'improve image delivery':'بهینه‌سازی حجم و بارگذاری تصاویر',
+    'layout shift culprits':'کاهش جابه‌جایی ناگهانی عناصر صفحه',
+    'network dependency tree':'بهبود ترتیب بارگذاری منابع صفحه',
+    'render-blocking requests':'کاهش منابعی که نمایش صفحه را به تأخیر می‌اندازند',
+    'forced reflow':'کاهش پردازش‌های اضافی هنگام نمایش صفحه',
+    'lcp request discovery':'بهبود شناسایی و بارگذاری محتوای اصلی صفحه',
+    'lcp breakdown':'بررسی عوامل مؤثر بر سرعت نمایش محتوای اصلی',
+    'document request latency':'کاهش زمان پاسخ اولیه صفحه',
+    'legacy javascript':'کاهش کدهای غیرضروری برای مرورگرهای قدیمی',
+    'reduce unused javascript':'کاهش کدهای جاوااسکریپت استفاده‌نشده',
+    'reduce unused css':'کاهش کدهای ظاهری استفاده‌نشده',
+    'minify javascript':'کم‌حجم‌سازی فایل‌های جاوااسکریپت',
+    'minify css':'کم‌حجم‌سازی فایل‌های ظاهری',
+    'avoid enormous network payloads':'کاهش حجم فایل‌های دریافتی صفحه',
+    'serve images in next-gen formats':'استفاده از قالب‌های مناسب‌تر برای تصاویر',
+    'properly size images':'استفاده از تصاویر با اندازه مناسب',
+    'eliminate render-blocking resources':'کاهش منابعی که نمایش صفحه را به تأخیر می‌اندازند'
+  };
+  const scoreClass = score => score == null ? 'unknown' : score >= 90 ? 'good' : score >= 50 ? 'medium' : 'poor';
+  const scoreText = score => score == null ? 'نامشخص' : score >= 90 ? 'خوب' : score >= 50 ? 'نیازمند بهبود' : 'ضعیف';
+  const displayURL = url => { try { return decodeURI(url); } catch { return url; } };
+  const scoreCard = (report, label, waiting) => {
+    if (!report) return `<div class="score-card pending"><div class="card-label">${label}</div><div class="pending-mark">—</div><p>${waiting ? 'نتایج پس از بهینه سازی در اینجا قرار خواهد گرفت' : 'برای این دستگاه هنوز آزمایشی ثبت نشده است.'}</p></div>`;
+    return `<div class="score-card ${scoreClass(report.score)}"><div class="card-label">${label}</div><div class="score-line"><strong>${report.score == null ? '—' : digits(report.score)}</strong><span>از ۱۰۰<br><b>${scoreText(report.score)}</b></span></div><div class="date">تاریخ آزمایش: ${e(faDate(report.date))}</div></div>`;
+  };
   const pages = new Map();
   for (const item of comparisons) { if (!pages.has(item.url)) pages.set(item.url, []); pages.get(item.url).push(item); }
-  const sections = [...pages].map(([url, devices]) => {
-    const rows = ['mobile','desktop'].map(strategy => {
+  const sections = [...pages].map(([url, devices], index) => {
+    const cards = (showMissingDevices ? ['mobile','desktop'] : devices.map(item => item.strategy)).map(strategy => {
       const item = devices.find(d => d.strategy === strategy);
-      if (!item) return `<tr><th>${strategy}</th><td>Not tested</td><td>—</td><td>—</td></tr>`;
-      const {before,after} = item;
-      const delta = after && before.score != null && after.score != null ? `${after.score-before.score > 0 ? '+' : ''}${after.score-before.score} points` : '—';
-      const score = r => r ? `${e(r.score ?? '—')} / 100<br><small>${e(new Date(r.date).toLocaleString())}</small>` : 'Not tested yet';
-      return `<tr><th>${strategy}</th><td>${score(before)}</td><td>${score(after)}</td><td>${e(delta)}</td></tr>`;
-    }).join('');
-    const details = devices.map(({strategy,before,after,notes}) => {
+      const label = strategy === 'mobile' ? 'تلفن همراه' : 'رایانه';
+      const before = item?.before, after = item?.after;
+      const names = [...new Set([...(before?.metrics || []), ...(after?.metrics || [])].map(m => m.title))].filter(name => metricNames[name]);
+      const metric = (report, name) => report?.metrics?.find(m => m.title === name)?.value;
+      const diff = before?.score != null && after?.score != null ? after.score-before.score : null;
+      const difference = diff == null ? '' : `<span class="change ${diff > 0 ? 'up' : diff < 0 ? 'down' : ''}">${diff > 0 ? `افزایش ${digits(diff)} امتیاز` : diff < 0 ? `کاهش ${digits(Math.abs(diff))} امتیاز` : 'بدون تغییر در امتیاز'}</span>`;
       const current = after || before;
-      const names = [...new Set([...(before.metrics || []), ...(after?.metrics || [])].map(m => m.title))];
-      const metric = (r, name) => r?.metrics?.find(m => m.title === name)?.value || '—';
-      const insights = (current.recommendations || []).map(a => `<li><strong>${e(a.title)}</strong>${a.displayValue ? ` — ${e(a.displayValue)}` : ''}<p>${e(a.description || '')}</p></li>`).join('');
-      return `<div class="device"><h3>${e(strategy)} details</h3><p><strong>Work completed:</strong> ${e(notes || 'Not provided')}</p><table><tr><th>Lab metric</th><th>Before</th><th>After</th></tr>${names.map(name => `<tr><th>${e(name)}</th><td>${e(metric(before,name))}</td><td>${e(metric(after,name))}</td></tr>`).join('')}</table><h4>Google insights from ${after ? 'after' : 'the baseline'}</h4>${insights ? `<ul>${insights}</ul>` : '<p>No actionable insights returned.</p>'}</div>`;
+      const known = [], unique = new Set(); let other = 0;
+      for (const audit of current?.recommendations || []) {
+        const translated = insights[String(audit.title || '').trim().toLowerCase()];
+        if (translated && !unique.has(translated)) { unique.add(translated); known.push(translated); }
+        else if (!translated) other++;
+      }
+      const recommendations = current ? `<div class="insight-block"><h4>موارد قابل بررسی ${after ? 'پس از بهینه‌سازی' : 'در بررسی اولیه'}</h4>${known.length ? `<ul>${known.map(text => `<li>${e(text)}</li>`).join('')}</ul>` : '<p>پیشنهادی در این بخش ثبت نشده است.</p>'}${other ? `<p class="more">${digits(other)} مورد فنی دیگر در گزارش تخصصی گوگل موجود است.</p>` : ''}</div>` : '';
+      const metrics = names.length ? `<div class="metrics-block"><h4>شاخص‌های عملکرد</h4><table><thead><tr><th>شاخص</th><th>پیش از بهینه‌سازی</th><th>پس از بهینه‌سازی</th></tr></thead><tbody>${names.map(name => `<tr><th scope="row">${e(metricNames[name])}</th><td>${e(faValue(metric(before,name)))}</td><td>${e(faValue(metric(after,name)))}</td></tr>`).join('')}</tbody></table></div>` : '';
+      return `<article class="device"><div class="device-title"><h3>${label}</h3>${difference}</div><div class="comparison">${scoreCard(before,'پیش از بهینه‌سازی',false)}${scoreCard(after,'پس از بهینه‌سازی',true)}</div>${item?.notes?.trim() ? `<div class="work"><strong>اقدامات انجام‌شده</strong><p>${e(item.notes.trim())}</p></div>` : ''}${metrics}${recommendations}</article>`;
     }).join('');
-    return `<section><h2>${e(url)}</h2><table><thead><tr><th>Device</th><th>Before</th><th>After</th><th>Change</th></tr></thead><tbody>${rows}</tbody></table>${details}</section>`;
+    return `<section class="page-section"><div class="page-heading"><span class="page-number">${digits(String(index + 1).padStart(2,'0'))}</span><div><h2>صفحه ${digits(index + 1)}</h2><div class="url" dir="ltr">${e(displayURL(url))}</div></div></div>${cards}</section>`;
   }).join('');
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PageSpeed report — ${e(domain)}</title><style>body{font:15px/1.6 system-ui,sans-serif;color:#203328;max-width:1000px;margin:45px auto;padding:0 24px}h1{font-size:34px}h2{font-size:19px;overflow-wrap:anywhere}h3{text-transform:capitalize}.tag,small{color:#6c8070}section{border-top:2px solid #dce6dc;padding:20px 0;break-inside:avoid}table{border-collapse:collapse;width:100%;margin:15px 0}th,td{text-align:left;padding:10px;border-bottom:1px solid #dce6dc}th{text-transform:capitalize}li p{white-space:pre-wrap;color:#607264}button{background:#203d30;color:white;border:0;border-radius:8px;padding:12px 16px;cursor:pointer}@media print{body{margin:0;max-width:none}button{display:none}}</style></head><body><button onclick="window.print()">Print / save as PDF</button><p class="tag">GOOGLE PAGESPEED INSIGHTS</p><h1>Website performance report</h1><p>${e(domain)} · ${pages.size} page${pages.size === 1 ? '' : 's'} · generated ${e(new Date().toLocaleString())}</p><p>Scores are lab measurements and may vary between runs. Before and after show the selected runs for the same page and device. A dash means no comparable run is available.</p>${sections}<p>For Google's complete audit evidence and field data where available, see the accompanying AI data export.</p></body></html>`;
+  return `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>گزارش عملکرد وب‌سایت ${e(domain)}</title><style>
+  *{box-sizing:border-box}html{background:#eef3f5}body{margin:0;color:#20313c;font-family:Vazirmatn,IRANYekan,Tahoma,'DejaVu Sans',sans-serif;line-height:1.8;font-size:13px;print-color-adjust:exact;-webkit-print-color-adjust:exact}.sheet{max-width:940px;margin:32px auto;background:white;padding:42px 48px;box-shadow:0 8px 32px #29425718}.toolbar{max-width:940px;margin:22px auto -15px;text-align:left}.toolbar button{border:0;border-radius:9px;padding:11px 20px;background:#12677b;color:white;font:inherit;cursor:pointer}.masthead{border-top:7px solid #167b88;padding-top:20px}.kicker{color:#16818b;font-size:11px;font-weight:700;letter-spacing:.02em}.masthead h1{font-size:28px;line-height:1.5;margin:7px 0 5px;color:#193544}.lead{margin:0;color:#657985}.meta{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0 0}.meta span{background:#f0f6f7;border:1px solid #dce9eb;border-radius:8px;padding:7px 12px;font-size:12px}.meta .domain{direction:ltr;unicode-bidi:isolate}.guide{margin:24px 0 12px;padding:13px 16px;border-right:4px solid #5aaeb6;background:#f2f8f8;color:#506b76;font-size:12px}.legend{display:flex;gap:14px;flex-wrap:wrap;margin:12px 0 25px;color:#687c85;font-size:11px}.legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-left:5px}.page-section{border-top:1px solid #dce8ea;padding:23px 0 10px}.page-heading{display:flex;align-items:center;gap:13px;margin-bottom:12px;break-after:avoid}.page-number{display:grid;place-items:center;flex:none;width:39px;height:39px;border-radius:10px;background:#e7f4f4;color:#177985;font-size:14px;font-weight:700}.page-heading h2{font-size:17px;margin:0}.url{direction:ltr;text-align:right;unicode-bidi:isolate;color:#71838b;font-size:11px;overflow-wrap:anywhere}.device{margin:16px 0 23px}.device-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 8px;break-after:avoid}.device-title h3{font-size:15px;margin:0}.change{font-size:11px;padding:4px 9px;background:#eef2f3;border-radius:20px;color:#657982}.change.up{background:#e5f5ef;color:#16805a}.change.down{background:#fff0ed;color:#b54a40}.comparison{display:flex;gap:10px;break-inside:avoid}.score-card{width:50%;min-height:125px;border:1px solid;border-radius:11px;padding:12px 16px}.score-card.good{background:#ecf8f2;border-color:#b9e3cf;color:#137c50}.score-card.medium{background:#fff8e9;border-color:#f1d9a0;color:#9b690d}.score-card.poor{background:#fff0ed;border-color:#f0c6c0;color:#b64237}.score-card.unknown{background:#f5f7f7;border-color:#d9e1e2;color:#60747a}.score-card.pending{background:#f7f9fa;border:1px dashed #c6d4d8;color:#71838a}.card-label{font-size:11px;font-weight:700}.score-line{display:flex;align-items:center;gap:9px;margin:5px 0}.score-line strong{font-size:34px;line-height:1.2}.score-line span{font-size:10px;line-height:1.7}.score-line b{font-size:11px}.date{font-size:10px;opacity:.8}.pending-mark{font-size:25px;line-height:1.3}.pending p{font-size:11px;margin:3px 0 0}.metrics-block,.insight-block,.work{margin-top:15px;break-inside:avoid}.metrics-block h4,.insight-block h4{font-size:12px;margin:0 0 6px;color:#2a4a58}table{border-collapse:collapse;width:100%;font-size:11px}th,td{text-align:right;padding:7px 9px;border-bottom:1px solid #edf1f2}thead th{background:#f3f7f8;color:#657c85;font-weight:600}tbody th{font-weight:500}td{white-space:nowrap}.insight-block ul{margin:4px 0;padding-right:19px;columns:2;column-gap:25px}.insight-block li{break-inside:avoid;margin:2px 0;color:#455e68}.insight-block p,.work p{margin:3px 0;color:#677d86}.work{background:#f4f8f9;padding:9px 12px;border-radius:7px;white-space:pre-wrap}.work strong{color:#2a4a58}.more{font-size:11px}.footer{border-top:1px solid #dce8ea;padding-top:15px;color:#73878e;font-size:10px}.footer b{color:#527078}@page{size:A4;margin:13mm}@media print{html{background:#fff}.toolbar{display:none}.sheet{max-width:none;margin:0;padding:0;box-shadow:none}.masthead{padding-top:12px}.page-section{padding-top:14px}.device{margin:10px 0 16px}.score-card{min-height:108px}.metrics-block,.insight-block,.work{margin-top:10px}}@media screen and (max-width:600px){.sheet{padding:24px 18px;margin:20px 10px}.toolbar{margin:15px 10px}.comparison{flex-direction:column}.score-card{width:100%}.insight-block ul{columns:1}}
+  </style></head><body><div class="toolbar"><button onclick="window.print()">چاپ یا ذخیره به صورت PDF</button></div><main class="sheet"><header class="masthead"><div class="kicker">گزارش بررسی وب‌سایت · GOOGLE PAGESPEED INSIGHTS</div><h1>گزارش سرعت و عملکرد وب‌سایت</h1><p class="lead">مقایسه وضعیت صفحات در تلفن همراه و رایانه</p><div class="meta"><span>وب‌سایت: <b class="domain" dir="ltr">${e(domain)}</b></span><span>تعداد صفحات: <b>${digits(pages.size)}</b></span><span>تاریخ تهیه گزارش: <b>${e(faDate(new Date()))}</b></span></div></header><div class="guide">امتیاز عملکرد از ۱۰۰ محاسبه می‌شود؛ عدد بالاتر نشان‌دهنده عملکرد بهتر در همان آزمایش است. در صورت آماده نبودن نتیجه پس از بهینه‌سازی، بخش مربوطه برای تکمیل بعدی در نظر گرفته شده است.</div><div class="legend"><span><i style="background:#16a46b"></i>۹۰ تا ۱۰۰: خوب</span><span><i style="background:#dfa42b"></i>۵۰ تا ۸۹: نیازمند بهبود</span><span><i style="background:#d85b4c"></i>۰ تا ۴۹: ضعیف</span></div>${sections}<footer class="footer"><b>درباره این گزارش:</b> نتایج بر اساس آزمایش‌های PageSpeed Insights گوگل تهیه شده‌اند و ممکن است در هر نوبت تغییر کنند. برای بررسی جزئیات فنی و داده‌های کامل، از گزارش تخصصی استفاده کنید.</footer></main></body></html>`;
 }
 function websiteData(domain, comparisons, history) {
   return {format:'PageSpeed Workbench website report v1', domain, instructions:'Review the complete Google responses by page and device. Compare selected before and after runs when available. Identify actionable issues with audit IDs and evidence. Do not infer causation from scores alone; inspect the codebase before making changes.', comparisons:comparisons.map(({url,strategy,before,after,notes}) => ({url,strategy,beforeId:before.id,afterId:after?.id || null,changesDescribedByUser:notes})), reports:history.map(r => ({id:r.id,url:r.url,strategy:r.strategy,date:r.date,score:r.score,googleResponse:r.googleResponse || null,savedSummary:r.googleResponse ? undefined : r})), note:'A null googleResponse is an older summary-only report; rerun that page to capture the full response.'};

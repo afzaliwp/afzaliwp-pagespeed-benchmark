@@ -61,19 +61,38 @@ function manualReport(data) {
   const digits = value => String(value).replace(/[0-9]/g, d => '۰۱۲۳۴۵۶۷۸۹'[Number(d)]);
   if (!data.title.trim() || !data.scores.length) throw new Error('عنوان و حداقل یک امتیاز را وارد کنید.');
   const cards = data.scores.map(item => {
-    const normalized = item.score.trim().replace(/[۰-۹٠-٩]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d) >= 0 ? '۰۱۲۳۴۵۶۷۸۹'.indexOf(d) : '٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
-    if (!item.label.trim() || !/^\d{1,3}$/.test(normalized) || Number(normalized) > 100) throw new Error('برای هر امتیاز، عنوان و عدد صحیح بین ۰ تا ۱۰۰ وارد کنید.');
-    let link = '';
-    if (item.link.trim()) {
-      let url; try { url = new URL(item.link.trim()); } catch { throw new Error('لینک گزارش باید یک نشانی معتبر HTTP یا HTTPS باشد.'); }
-      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('لینک گزارش باید یک نشانی معتبر HTTP یا HTTPS بدون نام کاربری و رمز عبور باشد.');
-      link = `<a href="${e(url.href)}" target="_blank" rel="noopener noreferrer" dir="ltr">${e(item.link.trim())}</a>`;
-    }
-    const score = Number(normalized), color = score >= 90 ? 'good' : score >= 50 ? 'medium' : 'poor';
-    return `<article class="card"><h2>${e(item.label.trim())}</h2><div class="score ${color}">${digits(score)}<small> / ۱۰۰</small></div>${link}${item.note.trim() ? `<p>${e(item.note.trim())}</p>` : ''}</article>`;
+    if (!item.label.trim()) throw new Error('برای هر مقایسه عنوان وارد کنید.');
+    const scoreCard = (stage, label) => {
+      const raw = (item[`${stage}Score`] || '').trim();
+      const date = (item[`${stage}Date`] || '').trim();
+      const linkValue = (item[`${stage}Link`] || '').trim();
+      if (stage === 'after' && !raw && !date && !linkValue) return {score:null, html:`<div class="score-card pending"><strong>${label}</strong><p>نتایج پس از بهینه‌سازی در اینجا قرار خواهد گرفت.</p></div>`};
+      const normalized = raw.replace(/[۰-۹٠-٩]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d) >= 0 ? '۰۱۲۳۴۵۶۷۸۹'.indexOf(d) : '٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+      if (!/^\d{1,3}$/.test(normalized) || Number(normalized) > 100) throw new Error('برای هر نتیجه، عدد صحیح بین ۰ تا ۱۰۰ وارد کنید.');
+      let link = '';
+      if (linkValue) {
+        let url; try { url = new URL(linkValue); } catch { throw new Error('لینک گزارش باید یک نشانی معتبر HTTP یا HTTPS باشد.'); }
+        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('لینک گزارش باید یک نشانی معتبر HTTP یا HTTPS بدون نام کاربری و رمز عبور باشد.');
+        link = `<a href="${e(url.href)}" target="_blank" rel="noopener noreferrer" dir="ltr">${e(linkValue)}</a>`;
+      }
+      let dateText = 'تاریخ ثبت نشده';
+      if (date) {
+        const parsed = new Date(`${date}T00:00:00Z`);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(parsed.valueOf()) || parsed.toISOString().slice(0,10) !== date) throw new Error('تاریخ معتبر وارد کنید.');
+        dateText = new Intl.DateTimeFormat('fa-IR-u-ca-persian', {year:'numeric', month:'long', day:'numeric', timeZone:'UTC'}).format(parsed);
+      }
+      const score = Number(normalized), color = score >= 90 ? 'good' : score >= 50 ? 'medium' : 'poor';
+      const description = score >= 90 ? 'خوب' : score >= 50 ? 'نیازمند بهبود' : 'ضعیف';
+      return {score, html:`<div class="score-card ${color}"><strong>${label}</strong><div class="score-line"><div class="score-ring" role="img" aria-label="امتیاز ${digits(score)} از ۱۰۰، ${description}"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="ring-track" cx="50" cy="50" r="42"/><circle class="ring-value" cx="50" cy="50" r="42" pathLength="100" stroke-dasharray="${score} 100" transform="rotate(-90 50 50)"/></svg><b>${digits(score)}</b></div><span>از ۱۰۰<br>${description}</span></div><div class="date">تاریخ آزمایش: ${e(dateText)}</div>${link}</div>`};
+    };
+    const before = scoreCard('before','پیش از بهینه‌سازی'), after = scoreCard('after','پس از بهینه‌سازی');
+    const diff = after.score == null ? null : after.score - before.score;
+    const change = diff == null ? '' : `<span class="change">${diff > 0 ? `افزایش ${digits(diff)} امتیاز` : diff < 0 ? `کاهش ${digits(-diff)} امتیاز` : 'بدون تغییر در امتیاز'}</span>`;
+    return `<article class="card"><div class="card-heading"><h2>${e(item.label.trim())}</h2>${change}</div><div class="comparison">${before.html}${after.html}</div>${item.note.trim() ? `<p>${e(item.note.trim())}</p>` : ''}</article>`;
   }).join('');
   return `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${e(data.title.trim())}</title><style>
-  *{box-sizing:border-box}body{margin:0;background:#eef3f5;color:#20313c;font:14px/1.9 Tahoma,'DejaVu Sans',sans-serif;print-color-adjust:exact;-webkit-print-color-adjust:exact}.toolbar{max-width:900px;margin:20px auto;text-align:left}.toolbar button{background:#12677b;color:white;border:0;border-radius:8px;padding:10px 18px;font:inherit;cursor:pointer}.sheet{max-width:900px;margin:20px auto;padding:42px 48px;background:white;box-shadow:0 8px 32px #29425718}.header{border-top:7px solid #167b88;padding-top:18px}.header h1{font-size:26px;margin:0 0 8px}.client{color:#477783}.summary,.contact{white-space:pre-wrap;overflow-wrap:anywhere}.summary{padding:16px;background:#f2f8f8;border-right:4px solid #5aaeb6;margin:22px 0}.cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:24px 0}.card{border:1px solid #dce8ea;border-radius:11px;padding:18px;break-inside:avoid;min-width:0}.card h2{font-size:16px;margin:0 0 8px;overflow-wrap:anywhere}.score{font-size:30px;font-weight:bold}.score small{font-size:13px}.good{color:#137c50}.medium{color:#9b690d}.poor{color:#b64237}.card a{display:block;text-align:right;color:#12677b;overflow-wrap:anywhere;word-break:break-word;font-size:11px;margin-top:5px}.card p{white-space:pre-wrap;overflow-wrap:anywhere;margin:12px 0 0}.contact{border-top:1px solid #dce8ea;margin-top:28px;padding-top:16px}.contact h2{font-size:15px;margin:0}.contact p{margin:3px 0}@page{size:A4;margin:12mm}@media print{body{background:white}.toolbar{display:none}.sheet{margin:0;padding:0;box-shadow:none}}@media screen and (max-width:600px){.sheet{padding:24px 18px;margin:12px}.toolbar{margin:12px}.cards{grid-template-columns:1fr}}
+  @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700&display=swap');*{box-sizing:border-box}body{margin:0;background:#eef3f5;color:#20313c;font:14px/1.9 Vazirmatn,Tahoma,'DejaVu Sans',sans-serif;print-color-adjust:exact;-webkit-print-color-adjust:exact}.toolbar{max-width:900px;margin:20px auto;text-align:left}.toolbar button{background:#12677b;color:white;border:0;border-radius:8px;padding:10px 18px;font:inherit;cursor:pointer}.sheet{max-width:900px;margin:20px auto;padding:42px 48px;background:white;box-shadow:0 8px 32px #29425718}.header{border-top:7px solid #167b88;padding-top:18px}.header h1{font-size:26px;margin:0 0 8px}.client{color:#477783}.summary,.contact{white-space:pre-wrap;overflow-wrap:anywhere}.summary{padding:16px;background:#f2f8f8;border-right:4px solid #5aaeb6;margin:22px 0}.cards{margin:24px 0}.card{border-top:1px solid #dce8ea;padding:18px 0;break-inside:avoid;min-width:0}.card h2{font-size:16px;margin:0 0 8px;overflow-wrap:anywhere}.comparison{display:flex;gap:10px}.score-card{flex:1;min-width:0;border:1px solid;border-radius:11px;padding:12px 16px;font-size:11px}.score-card.good{background:#ecf8f2;border-color:#b9e3cf;color:#137c50}.score-card.medium{background:#fff8e9;border-color:#f1d9a0;color:#9b690d}.score-card.poor{background:#fff0ed;border-color:#f0c6c0;color:#b64237}.score-card.pending{background:#f7f9fa;border:1px dashed #c6d4d8;color:#71838a}.score-line{display:flex;align-items:center;gap:12px;margin:7px 0}.score-ring{width:72px;height:72px;position:relative;flex:none;display:grid;place-items:center}.score-ring svg{position:absolute;inset:0;width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:6}.ring-track{opacity:.18}.ring-value{stroke-linecap:round}.score-ring b{font-size:23px}.date{font-size:10px}.card a{display:block;text-align:right;color:#12677b;overflow-wrap:anywhere;word-break:break-word;font-size:11px;margin-top:5px}.card p{white-space:pre-wrap;overflow-wrap:anywhere;margin:12px 0 0}.contact{border-top:1px solid #dce8ea;margin-top:28px;padding-top:16px}.contact h2{font-size:15px;margin:0}.contact p{margin:3px 0}@page{size:A4;margin:12mm}@media print{body{background:white}.toolbar{display:none}.sheet{margin:0;padding:0;box-shadow:none}}@media screen and (max-width:600px){.sheet{padding:24px 18px;margin:12px}.toolbar{margin:12px}.comparison{flex-direction:column}}
+  .card-heading{display:flex;justify-content:space-between;align-items:center;gap:10px}.change{font-size:11px;background:#eef2f3;color:#506b76;border-radius:20px;padding:4px 9px;white-space:nowrap}
   </style></head><body><div class="toolbar"><button onclick="window.print()">چاپ یا ذخیره به صورت PDF</button></div><main class="sheet"><header class="header"><h1>${e(data.title.trim())}</h1>${data.client.trim() ? `<div class="client">${e(data.client.trim())}</div>` : ''}</header>${data.summary.trim() ? `<div class="summary">${e(data.summary.trim())}</div>` : ''}<div class="cards">${cards}</div>${data.author.trim() || data.contact.trim() ? `<footer class="contact"><h2>تهیه‌کننده گزارش</h2>${data.author.trim() ? `<p>${e(data.author.trim())}</p>` : ''}${data.contact.trim() ? `<p>${e(data.contact.trim())}</p>` : ''}</footer>` : ''}</main></body></html>`;
 }
 function websiteReport(domain, comparisons, showMissingDevices = true) {
@@ -205,7 +224,8 @@ if (typeof document !== 'undefined') {
   const manualKey = 'pagespeed-workbench-manual-report-v1';
   function addManualScore(item = {}) {
     const card = document.createElement('fieldset'); card.className = 'manual-score';
-    card.innerHTML = `<legend>امتیاز</legend><label>عنوان امتیاز<input name="label" type="text" placeholder="مثلاً صفحه اصلی، موبایل، بعد از بهینه‌سازی" value="${escapeHTML(item.label || '')}" required></label><label>امتیاز از ۱۰۰<input name="score" type="text" inputmode="numeric" placeholder="مثلاً ۹۰" value="${escapeHTML(item.score || '')}" required></label><label>لینک گزارش PageSpeed<input name="link" type="text" dir="ltr" placeholder="https://pagespeed.web.dev/analysis/..." value="${escapeHTML(item.link || '')}"></label><label>توضیحات این امتیاز<textarea name="note" rows="2">${escapeHTML(item.note || '')}</textarea></label><button type="button" class="delete remove-score">حذف امتیاز</button>`;
+    const fields = (stage, title) => `<div class="manual-stage"><h4>${title}</h4><label>امتیاز از ۱۰۰<input name="${stage}Score" type="text" inputmode="numeric" placeholder="مثلاً ۹۰" value="${escapeHTML(item[`${stage}Score`] ?? (stage === 'before' ? item.score : '') ?? '')}" ${stage === 'before' ? 'required' : ''}></label><label>تاریخ آزمایش<input name="${stage}Date" type="date" value="${escapeHTML(item[`${stage}Date`] || '')}"></label><label>لینک گزارش PageSpeed<input name="${stage}Link" type="text" dir="ltr" placeholder="https://pagespeed.web.dev/analysis/..." value="${escapeHTML(item[`${stage}Link`] ?? (stage === 'before' ? item.link : '') ?? '')}"></label></div>`;
+    card.innerHTML = `<legend>مقایسه</legend><label>عنوان صفحه و دستگاه<input name="label" type="text" placeholder="مثلاً صفحه اصلی، موبایل" value="${escapeHTML(item.label || '')}" required></label><div class="manual-stages">${fields('before','پیش از بهینه‌سازی')}${fields('after','پس از بهینه‌سازی (اختیاری)')}</div><label>توضیحات این مقایسه<textarea name="note" rows="2">${escapeHTML(item.note || '')}</textarea></label><button type="button" class="delete remove-score">حذف مقایسه</button>`;
     manualScores.append(card);
   }
   function manualData() {

@@ -56,6 +56,26 @@ function aiExport(before, after, notes) {
   if (!compatible(before, after)) throw new Error('Compare the same URL and device.');
   return {format:'PageSpeed Workbench comparison v1', instructions:'Compare the before and after Google responses. Use lighthouseResult audits, details, metricSavings and field data where available. Identify remaining actionable issues and affected resources, cite the audit IDs and evidence, and do not assume a cause for score changes. Check the actual codebase before making changes.', url:after.url, strategy:after.strategy, changesDescribedByUser:notes, before:{date:before.date, score:before.score, googleResponse:before.googleResponse || null, savedSummary:before.googleResponse ? undefined : before}, after:{date:after.date, score:after.score, googleResponse:after.googleResponse || null, savedSummary:after.googleResponse ? undefined : after}, note:'A null googleResponse indicates an older summary-only report; run a new audit to capture the full response.'};
 }
+function manualReport(data) {
+  const e = escapeHTML;
+  const digits = value => String(value).replace(/[0-9]/g, d => '۰۱۲۳۴۵۶۷۸۹'[Number(d)]);
+  if (!data.title.trim() || !data.scores.length) throw new Error('عنوان و حداقل یک امتیاز را وارد کنید.');
+  const cards = data.scores.map(item => {
+    const normalized = item.score.trim().replace(/[۰-۹٠-٩]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d) >= 0 ? '۰۱۲۳۴۵۶۷۸۹'.indexOf(d) : '٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+    if (!item.label.trim() || !/^\d{1,3}$/.test(normalized) || Number(normalized) > 100) throw new Error('برای هر امتیاز، عنوان و عدد صحیح بین ۰ تا ۱۰۰ وارد کنید.');
+    let link = '';
+    if (item.link.trim()) {
+      let url; try { url = new URL(item.link.trim()); } catch { throw new Error('لینک گزارش باید یک نشانی معتبر HTTP یا HTTPS باشد.'); }
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('لینک گزارش باید یک نشانی معتبر HTTP یا HTTPS بدون نام کاربری و رمز عبور باشد.');
+      link = `<a href="${e(url.href)}" target="_blank" rel="noopener noreferrer" dir="ltr">${e(item.link.trim())}</a>`;
+    }
+    const score = Number(normalized), color = score >= 90 ? 'good' : score >= 50 ? 'medium' : 'poor';
+    return `<article class="card"><h2>${e(item.label.trim())}</h2><div class="score ${color}">${digits(score)}<small> / ۱۰۰</small></div>${link}${item.note.trim() ? `<p>${e(item.note.trim())}</p>` : ''}</article>`;
+  }).join('');
+  return `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${e(data.title.trim())}</title><style>
+  *{box-sizing:border-box}body{margin:0;background:#eef3f5;color:#20313c;font:14px/1.9 Tahoma,'DejaVu Sans',sans-serif;print-color-adjust:exact;-webkit-print-color-adjust:exact}.toolbar{max-width:900px;margin:20px auto;text-align:left}.toolbar button{background:#12677b;color:white;border:0;border-radius:8px;padding:10px 18px;font:inherit;cursor:pointer}.sheet{max-width:900px;margin:20px auto;padding:42px 48px;background:white;box-shadow:0 8px 32px #29425718}.header{border-top:7px solid #167b88;padding-top:18px}.header h1{font-size:26px;margin:0 0 8px}.client{color:#477783}.summary,.contact{white-space:pre-wrap;overflow-wrap:anywhere}.summary{padding:16px;background:#f2f8f8;border-right:4px solid #5aaeb6;margin:22px 0}.cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:24px 0}.card{border:1px solid #dce8ea;border-radius:11px;padding:18px;break-inside:avoid;min-width:0}.card h2{font-size:16px;margin:0 0 8px;overflow-wrap:anywhere}.score{font-size:30px;font-weight:bold}.score small{font-size:13px}.good{color:#137c50}.medium{color:#9b690d}.poor{color:#b64237}.card a{display:block;text-align:right;color:#12677b;overflow-wrap:anywhere;word-break:break-word;font-size:11px;margin-top:5px}.card p{white-space:pre-wrap;overflow-wrap:anywhere;margin:12px 0 0}.contact{border-top:1px solid #dce8ea;margin-top:28px;padding-top:16px}.contact h2{font-size:15px;margin:0}.contact p{margin:3px 0}@page{size:A4;margin:12mm}@media print{body{background:white}.toolbar{display:none}.sheet{margin:0;padding:0;box-shadow:none}}@media screen and (max-width:600px){.sheet{padding:24px 18px;margin:12px}.toolbar{margin:12px}.cards{grid-template-columns:1fr}}
+  </style></head><body><div class="toolbar"><button onclick="window.print()">چاپ یا ذخیره به صورت PDF</button></div><main class="sheet"><header class="header"><h1>${e(data.title.trim())}</h1>${data.client.trim() ? `<div class="client">${e(data.client.trim())}</div>` : ''}</header>${data.summary.trim() ? `<div class="summary">${e(data.summary.trim())}</div>` : ''}<div class="cards">${cards}</div>${data.author.trim() || data.contact.trim() ? `<footer class="contact"><h2>تهیه‌کننده گزارش</h2>${data.author.trim() ? `<p>${e(data.author.trim())}</p>` : ''}${data.contact.trim() ? `<p>${e(data.contact.trim())}</p>` : ''}</footer>` : ''}</main></body></html>`;
+}
 function websiteReport(domain, comparisons, showMissingDevices = true) {
   const e = escapeHTML;
   const digits = value => String(value).replace(/[0-9]/g, d => '۰۱۲۳۴۵۶۷۸۹'[Number(d)]);
@@ -148,7 +168,7 @@ function websiteReport(domain, comparisons, showMissingDevices = true) {
 function websiteData(domain, comparisons, history) {
   return {format:'PageSpeed Workbench website report v1', domain, instructions:'Review the complete Google responses by page and device. Compare selected before and after runs when available. Identify actionable issues with audit IDs and evidence. Do not infer causation from scores alone; inspect the codebase before making changes.', comparisons:comparisons.map(({url,strategy,before,after,notes}) => ({url,strategy,beforeId:before.id,afterId:after?.id || null,changesDescribedByUser:notes})), reports:history.map(r => ({id:r.id,url:r.url,strategy:r.strategy,date:r.date,score:r.score,googleResponse:r.googleResponse || null,savedSummary:r.googleResponse ? undefined : r})), note:'A null googleResponse is an older summary-only report; rerun that page to capture the full response.'};
 }
-if (typeof module !== 'undefined') module.exports = {parseURLs, buildQueue, pagespeedEndpoint, lighthouseResult, lighthouseFilename, makeReport, compatible, clientReport, aiExport, websiteReport, websiteData};
+if (typeof module !== 'undefined') module.exports = {parseURLs, buildQueue, pagespeedEndpoint, lighthouseResult, lighthouseFilename, makeReport, compatible, clientReport, aiExport, websiteReport, websiteData, manualReport};
 if (typeof document !== 'undefined') {
   const $ = id => document.getElementById(id);
   let reports = [], db;
@@ -181,6 +201,42 @@ if (typeof document !== 'undefined') {
   function download(name, content, type) {
     const href = URL.createObjectURL(new Blob([content], {type})); const a = document.createElement('a'); a.href = href; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(href), 1000);
   }
+  const manualForm = $('manual-form'), manualScores = $('manual-scores'), manualMessage = $('manual-message');
+  const manualKey = 'pagespeed-workbench-manual-report-v1';
+  function addManualScore(item = {}) {
+    const card = document.createElement('fieldset'); card.className = 'manual-score';
+    card.innerHTML = `<legend>امتیاز</legend><label>عنوان امتیاز<input name="label" type="text" placeholder="مثلاً صفحه اصلی، موبایل، بعد از بهینه‌سازی" value="${escapeHTML(item.label || '')}" required></label><label>امتیاز از ۱۰۰<input name="score" type="text" inputmode="numeric" placeholder="مثلاً ۹۰" value="${escapeHTML(item.score || '')}" required></label><label>لینک گزارش PageSpeed<input name="link" type="text" dir="ltr" placeholder="https://pagespeed.web.dev/analysis/..." value="${escapeHTML(item.link || '')}"></label><label>توضیحات این امتیاز<textarea name="note" rows="2">${escapeHTML(item.note || '')}</textarea></label><button type="button" class="delete remove-score">حذف امتیاز</button>`;
+    manualScores.append(card);
+  }
+  function manualData() {
+    const values = Object.fromEntries(new FormData(manualForm));
+    return {title:values.title, client:values.client, summary:values.summary, author:values.author, contact:values.contact, scores:[...manualScores.querySelectorAll('.manual-score')].map(card => Object.fromEntries([...card.querySelectorAll('input, textarea')].map(input => [input.name,input.value])))};
+  }
+  function saveManualDraft() {
+    try { localStorage.setItem(manualKey, JSON.stringify(manualData())); manualMessage.textContent = ''; }
+    catch { manualMessage.textContent = 'ذخیره پیش‌نویس در مرورگر ممکن نیست؛ برای نگهداری اطلاعات، گزارش را دریافت کنید.'; }
+  }
+  try {
+    const draft = JSON.parse(localStorage.getItem(manualKey) || 'null');
+    if (draft) {
+      for (const name of ['title','client','summary','author','contact']) if (typeof draft[name] === 'string') manualForm.elements[name].value = draft[name];
+      if (Array.isArray(draft.scores)) draft.scores.forEach(addManualScore);
+    }
+  } catch { manualMessage.textContent = 'خواندن پیش‌نویس ممکن نیست؛ اطلاعات ذخیره‌شده تغییر نکرده است.'; }
+  if (!manualScores.children.length) addManualScore();
+  manualForm.addEventListener('input', saveManualDraft);
+  $('add-score').addEventListener('click', () => { addManualScore(); saveManualDraft(); manualScores.lastElementChild.querySelector('input').focus(); });
+  manualScores.addEventListener('click', event => {
+    if (!event.target.matches('.remove-score')) return;
+    event.target.closest('.manual-score').remove();
+    if (!manualScores.children.length) addManualScore();
+    saveManualDraft();
+  });
+  manualForm.addEventListener('submit', event => {
+    event.preventDefault();
+    try { download('client-report-fa.html', manualReport(manualData()), 'text/html;charset=utf-8'); }
+    catch (error) { manualMessage.textContent = error.message; }
+  });
   function noteKey(url, strategy) { return `pagespeed-workbench-notes:${JSON.stringify([url, strategy])}`; }
   function readNote(url, strategy) { try { return localStorage.getItem(noteKey(url, strategy)); } catch { return null; } }
   function render() {

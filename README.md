@@ -29,3 +29,7 @@ Serve this directory over HTTP, for example `python3 -m http.server 8000`, then 
 Commit and push the files to the branch configured in **Settings → Pages**. GitHub Pages will publish the updated static site. A public repository is required for GitHub Pages on GitHub Free. Reports and API keys stay in the browser rather than in the repository.
 
 Google API documentation: https://developers.google.com/speed/docs/insights/v5/get-started
+
+## Custom Persian client report
+
+Use **ساخت گزارش نهایی مشتری** to enter a report title, client, your own text, and any number of scores. Give each score a descriptive title, a number from 0 to 100, an optional PageSpeed report link, and optional notes. Add your name and contact details, then download the Persian HTML report and open it to print or save as PDF. The builder works independently of saved Google runs and does not verify the manually entered scores. Its draft is saved in this browser's local storage; download the report to keep a copy.

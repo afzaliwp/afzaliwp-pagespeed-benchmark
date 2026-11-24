@@ -63,6 +63,27 @@ function aiExport(before, after, notes) {
   if (!compatible(before, after)) throw new Error('Compare the same URL and device.');
   return {format:'PageSpeed Workbench comparison v1', instructions:'Compare the before and after Google responses. Use lighthouseResult audits, details, metricSavings and field data where available. Identify remaining actionable issues and affected resources, cite the audit IDs and evidence, and do not assume a cause for score changes. Check the actual codebase before making changes.', url:after.url, strategy:after.strategy, changesDescribedByUser:notes, before:{date:before.date, score:before.score, googleResponse:before.googleResponse || null, savedSummary:before.googleResponse ? undefined : before}, after:{date:after.date, score:after.score, googleResponse:after.googleResponse || null, savedSummary:after.googleResponse ? undefined : after}, note:'A null googleResponse indicates an older summary-only report; run a new audit to capture the full response.'};
 }
+function selectedComparisons(root, reports) {
+  return [...root.querySelectorAll('.page-group')].map(item => {
+    const first = reports.find(r => r.id === item.querySelector('.before-select').value);
+    const last = reports.find(r => r.id === item.querySelector('.after-select').value);
+    if (!first || !last) throw new Error('A selected report is unavailable. Refresh the page and try again.');
+    if (new Date(first.date) > new Date(last.date)) throw new Error(`Choose an earlier Before run for ${item.dataset.url} (${item.dataset.strategy}).`);
+    return {url:item.dataset.url, strategy:item.dataset.strategy, before:first, after:first.id === last.id ? null : last, notes:item.querySelector('.change-notes').value};
+  });
+}
+function manualComparisons(comparisons) {
+  const date = value => {
+    if (!value) return '';
+    const d = new Date(value);
+    return Number.isNaN(d.valueOf()) ? '' : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  };
+  return comparisons.map(({url, strategy, before, after, notes}) => ({
+    label:`${strategy === 'mobile' ? 'تلفن همراه' : 'رایانه'} — ${url}`, pageURL:url,
+    beforeScore:String(before.score ?? ''), beforeDate:date(before.date), beforeLink:'',
+    afterScore:after ? String(after.score ?? '') : '', afterDate:after ? date(after.date) : '', afterLink:'', note:notes || ''
+  }));
+}
 function manualReport(data) {
   const e = escapeHTML;
   const digits = value => String(value).replace(/[0-9]/g, d => '۰۱۲۳۴۵۶۷۸۹'[Number(d)]);
@@ -199,7 +220,7 @@ function websiteReport(domain, comparisons, showMissingDevices = true) {
 function websiteData(domain, comparisons, history) {
   return {format:'PageSpeed Workbench website report v1', domain, instructions:'Review the complete Google responses by page and device. Compare selected before and after runs when available. Identify actionable issues with audit IDs and evidence. Do not infer causation from scores alone; inspect the codebase before making changes.', comparisons:comparisons.map(({url,strategy,before,after,notes}) => ({url,strategy,beforeId:before.id,afterId:after?.id || null,changesDescribedByUser:notes})), reports:history.map(r => ({id:r.id,url:r.url,strategy:r.strategy,date:r.date,score:r.score,googleResponse:r.googleResponse || null,savedSummary:r.googleResponse ? undefined : r})), note:'A null googleResponse is an older summary-only report; rerun that page to capture the full response.'};
 }
-if (typeof module !== 'undefined') module.exports = {parseURLs, buildQueue, pagespeedEndpoint, lighthouseResult, lighthouseFilename, makeReport, compatible, clientReport, aiExport, websiteReport, websiteData, manualReport};
+if (typeof module !== 'undefined') module.exports = {parseURLs, buildQueue, pagespeedEndpoint, lighthouseResult, lighthouseFilename, makeReport, compatible, clientReport, aiExport, websiteReport, websiteData, selectedComparisons, manualComparisons, manualReport};
 if (typeof document !== 'undefined') {
   const $ = id => document.getElementById(id);
   let reports = [], db;
@@ -245,8 +266,8 @@ if (typeof document !== 'undefined') {
     return {title:values.title, client:values.client, summary:values.summary, author:values.author, contact:values.contact, scores:[...manualScores.querySelectorAll('.manual-score')].map(card => Object.fromEntries([...card.querySelectorAll('input, textarea')].map(input => [input.name,input.value])))};
   }
   function saveManualDraft() {
-    try { localStorage.setItem(manualKey, JSON.stringify(manualData())); manualMessage.textContent = ''; }
-    catch { manualMessage.textContent = 'ذخیره پیش‌نویس در مرورگر ممکن نیست؛ برای نگهداری اطلاعات، گزارش را دریافت کنید.'; }
+    try { localStorage.setItem(manualKey, JSON.stringify(manualData())); manualMessage.textContent = ''; return true; }
+    catch { manualMessage.textContent = 'ذخیره پیش‌نویس در مرورگر ممکن نیست؛ برای نگهداری اطلاعات، گزارش را دریافت کنید.'; return false; }
   }
   try {
     const draft = JSON.parse(localStorage.getItem(manualKey) || 'null');
@@ -302,6 +323,7 @@ if (typeof document !== 'undefined') {
   function readNote(url, strategy) { try { return localStorage.getItem(noteKey(url, strategy)); } catch { return null; } }
   function render() {
     $('count').textContent = reports.length;
+    $('build-all').disabled = !reports.length;
     if (!reports.length) { $('reports').innerHTML = '<div class="empty"><div class="empty-icon">✳</div><strong>Your first website starts here</strong><p>Run an analysis to create a website folder and capture your baseline.</p></div>'; return; }
     const openDomains = new Set([...document.querySelectorAll('.site-folder[open]')].map(folder => folder.dataset.domain));
     const domains = new Map();
@@ -315,7 +337,7 @@ if (typeof document !== 'undefined') {
       if (!devices.has(r.strategy)) devices.set(r.strategy, []);
       devices.get(r.strategy).push(r);
     }
-    $('reports').innerHTML = [...domains].map(([domain,pages]) => `<details class="site-folder" data-domain="${escapeHTML(domain)}" ${openDomains.has(domain) ? 'open' : ''}><summary><span>📁</span> ${escapeHTML(domain)} <small>${pages.size} page${pages.size === 1 ? '' : 's'} · Open folder</small></summary><div class="folder-content"><div class="folder-actions"><p>Download a report for every page and device in this folder. Lighthouse JSON files can be opened in the <a href="https://googlechrome.github.io/lighthouse/viewer/" target="_blank" rel="noopener noreferrer">Lighthouse Viewer ↗</a>.</p><p class="folder-error" role="status" aria-live="polite"></p><button class="download" data-action="site-client">↓ Full client report</button> <button class="download" data-action="site-ai">↓ Full AI report (JSON)</button></div>${[...pages].map(([url,devices]) => `<section class="url-group"><div class="page-heading"><strong>${escapeHTML(url)}</strong></div><div class="device-grid">${['mobile','desktop'].map(strategy => {
+    $('reports').innerHTML = [...domains].map(([domain,pages]) => `<details class="site-folder" data-domain="${escapeHTML(domain)}" ${openDomains.has(domain) ? 'open' : ''}><summary><span>📁</span> ${escapeHTML(domain)} <small>${pages.size} page${pages.size === 1 ? '' : 's'} · Open folder</small></summary><div class="folder-content"><div class="folder-actions"><p>Download a report for every page and device in this folder. Lighthouse JSON files can be opened in the <a href="https://googlechrome.github.io/lighthouse/viewer/" target="_blank" rel="noopener noreferrer">Lighthouse Viewer ↗</a>.</p><p class="folder-error" role="status" aria-live="polite"></p><button class="download" data-action="site-client">↓ Full client report</button> <button class="download" data-action="site-ai">↓ Full AI report (JSON)</button> <button class="download" data-action="site-builder">✎ Edit in report builder</button></div>${[...pages].map(([url,devices]) => `<section class="url-group"><div class="page-heading"><strong>${escapeHTML(url)}</strong></div><div class="device-grid">${['mobile','desktop'].map(strategy => {
       const group = devices.get(strategy);
       if (!group) return `<div class="device-card empty-device"><strong>${strategy}</strong><p>No ${strategy} report yet.</p></div>`;
       const latest = group[0], options = group.map(r => `<option value="${escapeHTML(r.id)}">${escapeHTML(new Date(r.date).toLocaleString())} · ${escapeHTML(r.score ?? '—')}/100${r.googleResponse ? '' : ' · summary only'}</option>`).join('');
@@ -328,6 +350,21 @@ if (typeof document !== 'undefined') {
     const group = e.target.closest('.page-group');
     try { localStorage.setItem(noteKey(group.dataset.url, group.dataset.strategy), e.target.value); } catch { message('Could not save your notes in browser storage.', true); }
   });
+  function loadReportBuilder(comparisons) {
+    if (!comparisons.length) throw new Error('There are no saved results to add.');
+    const scores = manualComparisons(comparisons);
+    if ([...manualScores.querySelectorAll('input, textarea')].some(input => input.value.trim()) && !confirm('Replace the comparisons in the current report draft? Your title, summary, contact details, and saved reports will be kept.')) return;
+    manualScores.replaceChildren(); scores.forEach(addManualScore);
+    const domains = new Set(comparisons.map(item => new URL(item.url).hostname));
+    if (!manualForm.elements.client.value.trim() && domains.size === 1) manualForm.elements.client.value = [...domains][0];
+    if (saveManualDraft()) manualMessage.textContent = 'نتایج به گزارش اضافه شدند؛ می‌توانید آن‌ها را ویرایش کنید.';
+    manualForm.scrollIntoView({behavior:'smooth', block:'start'});
+    manualScores.querySelector('input').focus({preventScroll:true});
+  }
+  $('build-all').addEventListener('click', () => {
+    try { loadReportBuilder(selectedComparisons($('reports'), reports)); }
+    catch (error) { message(error.message, true); }
+  });
   $('reports').addEventListener('click', async e => {
     const button = e.target.closest('button[data-action]'); if (!button) return;
     const folder = button.closest('.site-folder'); const group = button.closest('.page-group');
@@ -336,18 +373,15 @@ if (typeof document !== 'undefined') {
     const notes = group?.querySelector('.change-notes').value || '';
     try {
       folder.querySelector('.folder-error').textContent = '';
-      if (button.dataset.action === 'site-client' || button.dataset.action === 'site-ai') {
-        const comparisons = [...folder.querySelectorAll('.page-group')].map(item => {
-          const first = reports.find(r => r.id === item.querySelector('.before-select').value);
-          const last = reports.find(r => r.id === item.querySelector('.after-select').value);
-          if (!first || !last) throw new Error('A selected report is unavailable. Refresh the page and try again.');
-          if (new Date(first.date) > new Date(last.date)) throw new Error(`Choose an earlier Before run for ${item.dataset.url} (${item.dataset.strategy}).`);
-          return {url:item.dataset.url, strategy:item.dataset.strategy, before:first, after:first.id === last.id ? null : last, notes:item.querySelector('.change-notes').value};
-        });
+      if (['site-client','site-ai','site-builder'].includes(button.dataset.action)) {
+        const comparisons = selectedComparisons(folder, reports);
         const domain = folder.dataset.domain;
-        const history = reports.filter(r => new URL(r.url).hostname === domain);
         if (button.dataset.action === 'site-client') download(`pagespeed-${domain}-full-report.html`, websiteReport(domain,comparisons), 'text/html;charset=utf-8');
-        else download(`pagespeed-${domain}-full-ai-report.json`, JSON.stringify(websiteData(domain,comparisons,history),null,2), 'application/json');
+        else if (button.dataset.action === 'site-builder') loadReportBuilder(comparisons);
+        else {
+          const history = reports.filter(r => new URL(r.url).hostname === domain);
+          download(`pagespeed-${domain}-full-ai-report.json`, JSON.stringify(websiteData(domain,comparisons,history),null,2), 'application/json');
+        }
       } else if (button.dataset.action === 'delete') {
         const report = reports.find(r => r.id === button.dataset.id); if (!report || !confirm('Delete this saved report?')) return;
         await transaction('reports','readwrite',store => store.delete(report.id)); reports = reports.filter(r => r.id !== report.id); render();

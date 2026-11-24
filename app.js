@@ -79,7 +79,7 @@ function manualComparisons(comparisons) {
     return Number.isNaN(d.valueOf()) ? '' : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   };
   return comparisons.map(({url, strategy, before, after, notes}) => ({
-    label:`${strategy === 'mobile' ? 'تلفن همراه' : 'رایانه'} — ${url}`, pageURL:url,
+    label:`${strategy === 'mobile' ? 'تلفن همراه' : 'رایانه'} — ${url}`, pageURL:analysisURL(url),
     beforeScore:String(before.score ?? ''), beforeDate:date(before.date), beforeLink:'',
     afterScore:after ? String(after.score ?? '') : '', afterDate:after ? date(after.date) : '', afterLink:'', note:notes || ''
   }));
@@ -92,8 +92,12 @@ function manualReport(data) {
     if (!item.label.trim()) throw new Error('برای هر مقایسه عنوان وارد کنید.');
     let testLink = '';
     if (item.pageURL?.trim()) {
-      try { testLink = `<a class="test-link" href="${e(analysisURL(item.pageURL.trim()))}" target="_blank" rel="noopener noreferrer">آزمایش دوباره این صفحه در PageSpeed ↗</a>`; }
-      catch { throw new Error('آدرس صفحه باید یک نشانی معتبر HTTP یا HTTPS بدون نام کاربری و رمز عبور باشد.'); }
+      try {
+        const target = new URL(item.pageURL.trim());
+        const generated = analysisURL(target.href);
+        const link = target.origin === 'https://pagespeed.web.dev' && /^\/analysis(?:\/|$)/.test(target.pathname) ? target.href : generated;
+        testLink = `<a class="test-link" href="${e(link)}" target="_blank" rel="noopener noreferrer">آزمایش دوباره این صفحه در PageSpeed ↗</a>`;
+      } catch { throw new Error('لینک PageSpeed یا آدرس صفحه باید یک نشانی معتبر HTTP یا HTTPS بدون نام کاربری و رمز عبور باشد.'); }
     }
     const scoreCard = (stage, label) => {
       const raw = (item[`${stage}Score`] || '').trim();
@@ -258,7 +262,7 @@ if (typeof document !== 'undefined') {
   function addManualScore(item = {}) {
     const card = document.createElement('fieldset'); card.className = 'manual-score';
     const fields = (stage, title) => `<div class="manual-stage"><h4>${title}</h4><label>امتیاز از ۱۰۰<input name="${stage}Score" type="text" inputmode="numeric" placeholder="مثلاً ۹۰" value="${escapeHTML(item[`${stage}Score`] ?? (stage === 'before' ? item.score : '') ?? '')}" ${stage === 'before' ? 'required' : ''}></label><label>تاریخ آزمایش<input name="${stage}Date" type="date" value="${escapeHTML(item[`${stage}Date`] || '')}"></label><label>لینک گزارش PageSpeed<input name="${stage}Link" type="text" dir="ltr" placeholder="https://pagespeed.web.dev/analysis/..." value="${escapeHTML(item[`${stage}Link`] ?? (stage === 'before' ? item.link : '') ?? '')}"></label></div>`;
-    card.innerHTML = `<legend>مقایسه</legend><label>عنوان صفحه و دستگاه<input name="label" type="text" placeholder="مثلاً صفحه اصلی، موبایل" value="${escapeHTML(item.label || '')}" required></label><label>آدرس صفحه برای آزمایش دوباره در PageSpeed (اختیاری)<input name="pageURL" type="url" dir="ltr" placeholder="https://example.com/page" value="${escapeHTML(item.pageURL || '')}"></label><div class="manual-stages">${fields('before','پیش از بهینه‌سازی')}${fields('after','پس از بهینه‌سازی (اختیاری)')}</div><label>توضیحات این مقایسه<textarea name="note" rows="2">${escapeHTML(item.note || '')}</textarea></label><button type="button" class="delete remove-score">حذف مقایسه</button>`;
+    card.innerHTML = `<legend>مقایسه</legend><label>عنوان صفحه و دستگاه<input name="label" type="text" placeholder="مثلاً صفحه اصلی، موبایل" value="${escapeHTML(item.label || '')}" required></label><label>لینک آزمایش در PageSpeed (اختیاری)<input name="pageURL" type="url" dir="ltr" placeholder="https://pagespeed.web.dev/analysis?url=..." value="${escapeHTML(item.pageURL || '')}"></label><div class="manual-stages">${fields('before','پیش از بهینه‌سازی')}${fields('after','پس از بهینه‌سازی (اختیاری)')}</div><label>توضیحات این مقایسه<textarea name="note" rows="2">${escapeHTML(item.note || '')}</textarea></label><button type="button" class="delete remove-score">حذف مقایسه</button>`;
     manualScores.append(card);
   }
   function manualData() {
